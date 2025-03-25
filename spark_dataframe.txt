@@ -1,0 +1,56 @@
+from pyspark.sql import SparkSession
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("SparkDataframeTasks").getOrCreate()
+
+# Load 2010-summary data
+df_2010_summary = spark.read.json("/umbc/rs/is789sp25/common/data/2010-summary.json")
+df_2010_summary.createOrReplaceTempView("teamGryffindor_2010_table")
+print("2010 Data Sample:")
+df_2010_summary.show(5)
+
+# Load 2011-summary data
+df_2011_summary = spark.read.json("/umbc/rs/is789sp25/common/data/2011-summary.json")
+df_2011_summary.createOrReplaceTempView("teamGryffindor_2011_table")
+print("2011 Data Sample:")
+df_2011_summary.show(5)
+
+# Task 2: Filter records where ORIGIN_COUNTRY_NAME is 'United States'
+df_query_US = df_2010_summary.filter(df_2010_summary["ORIGIN_COUNTRY_NAME"] == "United States")
+print("Filtered Data for United States:")
+df_query_US.show(5)
+print("Count of rows with ORIGIN_COUNTRY_NAME = 'United States':", df_query_US.count())
+
+# Task 2 Output: Convert columns to one string column to avoid BIGINT issue when writing text
+df_query_US.selectExpr("concat(DEST_COUNTRY_NAME, '\t', ORIGIN_COUNTRY_NAME, '\t', cast(count as string)) as value") \
+    .coalesce(1) \
+    .write.mode('overwrite') \
+    .text("/umbc/rs/is789sp25/users/tejaswj1/homework4/df_query_US_result")
+
+# Prepare output directory for join result
+output_directory = "/umbc/rs/is789sp25/users/tejaswj1/homework4/df_join_result"
+fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(spark._jsc.hadoopConfiguration())
+if fs.exists(spark._jvm.org.apache.hadoop.fs.Path(output_directory)):
+    fs.delete(spark._jvm.org.apache.hadoop.fs.Path(output_directory), True)
+
+# Task 3: Perform join between ORIGIN_COUNTRY_NAME (2010) and DEST_COUNTRY_NAME (2011) with alias
+df_join = df_2010_summary.alias("t1").join(
+    df_2011_summary.alias("t2"),
+    df_2010_summary["ORIGIN_COUNTRY_NAME"] == df_2011_summary["DEST_COUNTRY_NAME"]
+)
+
+print("Join Result Sample:")
+df_join.show(5)
+print("Total Join Result Rows:", df_join.count())
+
+# Task 3 Output: Convert joined data to a single string column to avoid BIGINT issue
+df_join.selectExpr(
+    "concat(t1.DEST_COUNTRY_NAME, '\t', t1.ORIGIN_COUNTRY_NAME, '\t', cast(t1.count as string), '\t', " +
+    "t2.DEST_COUNTRY_NAME, '\t', t2.ORIGIN_COUNTRY_NAME, '\t', cast(t2.count as string)) as value"
+) \
+    .coalesce(1) \
+    .write.mode('overwrite') \
+    .text(output_directory)
+
+# Stop the Spark session
+spark.stop()
